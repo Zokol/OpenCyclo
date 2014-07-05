@@ -10,7 +10,7 @@
 // The amount of time (in milliseconds) between tests
 #define INIT_DELAY   500
 #define LOGO_DELAY   1000
-#define CALC_INTERVAL 2500
+#define N_PULSES     3
 
 const uint8_t SEG_DONE[] = {
 	SEG_B | SEG_C | SEG_D | SEG_E | SEG_G,           // d
@@ -50,16 +50,15 @@ const uint8_t SEG_CADENCE[] = {
 	};
 
 
-volatile int count = 0;
+volatile unsigned long pulses[] = {0, 0, 0};
 volatile int rpm = 0;
+volatile boolean pulses_full = false;
 
 TM1637Display display(CLK, DIO);
-Timer t;
 
 void setup()
 {
   attachInterrupt(0, revolution, FALLING);
-  t.every(CALC_INTERVAL, calcRPM);
 }
 
 void loop()
@@ -72,30 +71,51 @@ void loop()
   display.setSegments(data);
   delay(INIT_DELAY);
   display.setBrightness(0x0f);
-  //display.setSegments(SEG_DONE);
-  //delay(LOGO_DELAY);
+  display.setSegments(SEG_NULL);
   
   while(true){
-    t.update();
-    if(rpm < 1){
-      display.setSegments(SEG_NULL);
-    }
-    else if(rpm > 300){
-      display.setSegments(SEG_ERR);
-    }
-    else{
-      display.showNumberDec(rpm);
-    }
     delay(1000);
   }
 }
 
 void revolution(){
-  count += 1;
-}
-
-void calcRPM(){
-  float time = CALC_INTERVAL / 1000 / 60.0;
-  rpm = count / time;
-  count = 0;
+  // Check if pulses-array contains zeros
+  if(!pulses_full){
+    for(int i = 0; i < N_PULSES; i++){
+      if(pulses[i] == 0){
+        // Found zero from array, add current time in place of the found zero and exit
+        pulses[i] = millis();
+        return;
+      }
+    }
+    // Didn't find zeros, setting full-flag high so next iteration doesn't have to check if the array is full.
+    pulses_full = true;
+  }
+  else{
+    // Move last measurements one step left
+    for(int i = 0; i < N_PULSES - 1; i++){
+      pulses[i] = pulses[i+1];
+    }
+    // Set last measurement to current time
+    pulses[N_PULSES - 1] = millis();
+    
+    // Calc average of pulse distances
+    long sum = 0;
+    for(int i = 0; i < N_PULSES - 1; i++){
+      sum += pulses[i+1] - pulses[i];
+      //display.showNumberDec(sum);
+    }
+    
+    long avg = sum / N_PULSES;
+    //display.showNumberDec(avg);
+    
+    if(avg < 200){
+      display.setSegments(SEG_ERR);
+    }
+    else{
+      // Calc RPM from average distance
+      display.showNumberDec(60000 / avg);
+    }
+    
+  }
 }
